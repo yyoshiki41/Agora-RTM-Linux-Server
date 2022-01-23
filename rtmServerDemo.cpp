@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 #include <string>
@@ -6,9 +7,9 @@
 #include <sstream>
 #include <unistd.h>
 #include <pthread.h>
-#include <vector>
 #include <map>
 #include <algorithm>
+#include <chrono>
 
 #include "IAgoraRtmService.h"
 
@@ -48,6 +49,12 @@ class RtmEventHandler: public agora::rtm::IRtmServiceEventHandler {
                         const agora::rtm::IMessage *message) override {
         cout << "on message received from peer: peerId = " << peerId
              << " message = " << message->getText() << endl;
+    }
+
+    virtual void onAddOrUpdateChannelAttributesResult(long long requestId,
+                        agora::rtm::ATTRIBUTE_OPERATION_ERR errorCode) override {
+        cout << "on add or update channel attributes: requestId = " << requestId
+             << " errorCode = " << errorCode << endl;
     }
 };
 
@@ -101,7 +108,7 @@ class ChannelEventHandler: public agora::rtm::IChannelEventHandler {
                     agora::rtm::CHANNEL_MESSAGE_ERR_CODE state) override {
         cout << "send messageId: " << messageId << " state: " << state << endl;
     }
-    
+
     private:
         string channel_;
 };
@@ -130,13 +137,8 @@ class Demo {
     }
 
   public:
-    bool login() {
-        cout << "Please enter userID (literal \"null\" or starting " 
-             << "with space is not allowed, no more than 64 charaters!):"
-             << endl;
-        string userID;
-        getline(std::cin, userID);
-        if (rtmService_->login(APP_ID.c_str(), userID.c_str())) {
+    bool login(std::string token, std::string userId) {
+        if (rtmService_->login(token.c_str(), userId.c_str())) {
             cout << "login failed!" << endl;
             return false;
         }
@@ -188,6 +190,36 @@ class Demo {
         }
     }
 
+    void sendViewMessageToChannel(const std::string& channel, string &msg) {
+        channelEvent_.reset(new ChannelEventHandler(channel));
+        agora::rtm::IChannel * channelHandler =
+            rtmService_->createChannel(channel.c_str(), channelEvent_.get());
+        if (!channelHandler) {
+            cout << "create channel failed!" << endl;
+        }
+        // NOTE: You do not have to join the specified channel to update its attributes.
+        // channelHandler->join();
+        // channelHandler->leave();
+        agora::rtm::IRtmChannelAttribute* channelAttribute =
+            rtmService_->createChannelAttribute();
+        channelAttribute->setKey("views");
+        channelAttribute->setValue(msg.c_str());
+        const agora::rtm::IRtmChannelAttribute* a = channelAttribute;
+        agora::rtm::ChannelAttributeOptions * channelAttributeOptions = new agora::rtm::ChannelAttributeOptions();
+        channelAttributeOptions->enableNotificationToChannelMembers = true;
+        const agora::rtm::ChannelAttributeOptions* o = channelAttributeOptions;
+
+        const auto now = std::chrono::system_clock::now();
+        long long requestId = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+
+        int ret = rtmService_->addOrUpdateChannelAttributes(channel.c_str(), &a, 1, *o, requestId);
+        if (ret) {
+            cout << "adds or updates the attributes of a specified channel failed! return code: " << ret
+                 << endl;
+        }
+        channelAttribute->release();
+    }
+
     void sendMessageToPeer(std::string peerID, std::string msg) {
         agora::rtm::IMessage* rtmMessage = rtmService_->createMessage();
         rtmMessage->setText(msg.c_str());
@@ -215,34 +247,35 @@ class Demo {
 };
 
 int main(int argc, const char * argv[]) {
-    if (argc != 2) {
-        cout << "Usage: ./rtmServerDemo <AppID>" << endl;
+    ::srand(::time(NULL));
+    if (argc != 5) {
+        cout << "Usage: ./rtmServerDemo <userId> <token> <channel> <msg>" << endl;
         exit(-1);
     }
-    APP_ID = argv[1];
+    string userId = argv[1];
+    string token = argv[2];
+    string channel = argv[3];
+    string msg = argv[4];
+
+    APP_ID = std::getenv("APP_ID");
 
     std::vector<std::unique_ptr<Demo>> DemoList;
-    std::vector<bool> loginStatus;
-    int count = 1;
-    for (int i = 0; i < count; i++) {
-        std::unique_ptr<Demo> tmp;
-        tmp.reset(new Demo());
-        DemoList.push_back(std::move(tmp));
-        loginStatus.push_back(false);
-    }
+    std::unique_ptr<Demo> tmp;
+    tmp.reset(new Demo());
+    DemoList.push_back(std::move(tmp));
+
     int index = 1;
-    if (!loginStatus[index-1]) {
-        if (!DemoList[index-1]->login()) {
-            // TODO:
+    while(true) {
+        bool ret = DemoList[index-1]->login(token, userId);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (!ret) {
+            continue;
         }
-        loginStatus[index-1] = true;
+
+        DemoList[index-1]->sendViewMessageToChannel(channel, msg);
+        break;
     }
-
-    string channel;
-    DemoList[index-1]->groupChat(channel);
-
     DemoList[index-1]->logout();
-    loginStatus[index-1] = false;
 
     exit(0);
 }
