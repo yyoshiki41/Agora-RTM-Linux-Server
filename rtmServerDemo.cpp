@@ -249,7 +249,7 @@ class Demo {
 int main(int argc, const char * argv[]) {
     ::srand(::time(NULL));
     if (argc != 5) {
-        cout << "Usage: ./rtmServerDemo <userId> <token> <channel> <msg>" << endl;
+        cout << "Usage: rtmServerDemo <userId> <token> <channel> <msg>" << endl;
         exit(-1);
     }
     string userId = argv[1];

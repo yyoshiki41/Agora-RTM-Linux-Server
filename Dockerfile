@@ -17,4 +17,4 @@ COPY . .
 RUN ./build.sh clean
 RUN ./build.sh build
 
-CMD ./build/rtmServerDemo
+ENTRYPOINT ["/home/build/rtmServerDemo"]
